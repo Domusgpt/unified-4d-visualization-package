@@ -159,13 +159,58 @@
             
             <div class="control-group">
                 <label>Theme:</label>
-                <select onchange="setTheme(this.value)">
+                <select onchange="setTheme(this.value)" id="themeSelector">
                     <option value="hypercube">Hypercube (Magenta)</option>
                     <option value="tetrahedron">Tetrahedron (Cyan)</option>
-                    <option value="sphere">Sphere (Yellow)</option>
-                    <option value="custom">Custom</option>
+                    <option value="hypersphere">Hypersphere (Yellow)</option>
+                    <!-- Add other themes as geometries are implemented -->
                 </select>
             </div>
+
+            <h4 style="margin: 15px 0 10px 0; color: #0a84ff; border-top: 1px solid #333; padding-top: 15px;">Custom Reactivity</h4>
+            <div class="control-group">
+                <label>Target Parameter:</label>
+                <select id="reactivityTarget">
+                    <option value="morphFactor">Morph Factor</option>
+                    <option value="gridDensity">Grid Density</option>
+                    <option value="rotationSpeed">Rotation Speed</option>
+                    <option value="lineThickness">Line Thickness</option>
+                    <option value="audioBass">Audio Bass (Override)</option>
+                    <option value="audioMid">Audio Mid (Override)</option>
+                    <option value="audioHigh">Audio High (Override)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Source Type:</label>
+                <select id="reactivitySource">
+                    <option value="scrollIntensity">Scroll Intensity</option>
+                    <option value="clickIntensity">Click Intensity</option>
+                    <option value="mouseVelocity">Mouse Velocity</option>
+                    <option value="mousePositionX">Mouse X</option>
+                    <option value="mousePositionY">Mouse Y</option>
+                    <option value="time">Time</option>
+                    <option value="custom:agentValue1">Custom: agentValue1</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Scale: <span id="reactivityScaleValue">1.0</span></label>
+                <input type="range" id="reactivityScale" min="-5.0" max="5.0" step="0.1" value="1.0" oninput="document.getElementById('reactivityScaleValue').textContent = parseFloat(this.value).toFixed(1)">
+            </div>
+             <div class="control-group">
+                <label>Smoothing (0=instant, 0.99=slow): <span id="reactivitySmoothingValue">0.0</span></label>
+                <input type="range" id="reactivitySmoothing" min="0.0" max="0.99" step="0.01" value="0.0" oninput="document.getElementById('reactivitySmoothingValue').textContent = parseFloat(this.value).toFixed(2)">
+            </div>
+            <div class="button-group">
+                <button class="btn" onclick="applyReactivityMapping()">Apply Mapping</button>
+                <button class="btn" onclick="clearReactivityMappings()">Clear Mappings</button>
+            </div>
+
+            <div class="control-group" style="border-top: 1px solid #333; padding-top: 10px;">
+                <label>Custom Source Name: <input type="text" id="customSourceName" value="agentValue1" style="width: 100px; background: #333; color: #fff; border: 1px solid #555;"></label>
+                <label>Value: <span id="customSourceValueDisplay">0.5</span></label>
+                <input type="range" id="customSourceValue" min="0.0" max="1.0" step="0.01" value="0.5" oninput="updateCustomReactivityValue(this.value)">
+            </div>
+
         </div>
         
         <div class="info">
@@ -601,6 +646,55 @@
 
         // Update interaction info periodically
         setInterval(updateInteractionInfo, 100);
+
+        window.applyReactivityMapping = function() {
+            if (!engine) return;
+
+            const targetParameter = document.getElementById('reactivityTarget').value;
+            const sourceType = document.getElementById('reactivitySource').value;
+            const scale = parseFloat(document.getElementById('reactivityScale').value);
+            const smoothingFactor = parseFloat(document.getElementById('reactivitySmoothing').value);
+
+            const newMapping = {
+                targetParameter: targetParameter,
+                sourceType: sourceType,
+                scale: scale,
+                // Only add smoothingFactor if it's greater than 0, as undefined means no smoothing
+                ...(smoothingFactor > 0 && { smoothingFactor: smoothingFactor })
+            };
+
+            // For simplicity in test, this replaces all existing mappings with the new one.
+            // A more advanced test page might allow adding multiple mappings.
+            const currentConfig = engine.getConfig();
+            let updatedMappings = [newMapping];
+
+            // Example: if you want to add to existing instead of replacing:
+            // let updatedMappings = currentConfig.reactivityMappings ? [...currentConfig.reactivityMappings] : [];
+            // updatedMappings.push(newMapping);
+
+
+            engine.updateConfig({ reactivityMappings: updatedMappings });
+            updateStatus(`Applied mapping: ${sourceType} to ${targetParameter}`);
+        };
+
+        window.clearReactivityMappings = function() {
+            if (!engine) return;
+            engine.updateConfig({ reactivityMappings: [] }); // Pass an empty array
+            updateStatus('Cleared all custom reactivity mappings. Using default behavior.');
+        };
+
+        window.updateCustomReactivityValue = function(value) {
+            if (!engine) return;
+            const sourceName = document.getElementById('customSourceName').value.trim();
+            const numValue = parseFloat(value);
+
+            if (sourceName) {
+                engine.setCustomReactivityValue(sourceName, numValue);
+                document.getElementById('customSourceValueDisplay').textContent = numValue.toFixed(2);
+            } else {
+                console.warn("Custom source name is empty.");
+            }
+        };
 
         // Initialize when DOM is ready
         if (document.readyState === 'loading') {

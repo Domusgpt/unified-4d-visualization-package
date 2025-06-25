@@ -95,7 +95,36 @@ export interface Unified4DConfig {
   interactions: Partial<InteractionConfig>;
   performance: Partial<PerformanceSettings>;
   theming: Partial<ThemeConfiguration>;
+  reactivityMappings?: ReactivitySourceMap[]; // Added for custom reactivity
 }
+
+// --- New Interface for Reactivity Mapping ---
+export type ReactivitySourceType =
+  | 'scrollIntensity'
+  | 'clickIntensity'
+  | 'mouseVelocity'
+  | 'mousePositionX'
+  | 'mousePositionY'
+  | 'time' // Raw u_time, can be scaled/offset by mapping
+  | `custom:${string}`; // e.g., 'custom:agentMood', 'custom:externalAudio1'
+
+export interface ReactivitySourceMap {
+  targetParameter: keyof ShaderParameters; // e.g., 'audioBass', 'morphFactor', 'gridDensity'
+  sourceType: ReactivitySourceType;
+
+  // Optional processing parameters
+  scale?: number;          // Multiplier, default 1
+  offset?: number;         // Added value, default 0
+  minClamp?: number;       // Minimum output value after scaling/offset/inversion
+  maxClamp?: number;       // Maximum output value after scaling/offset/inversion
+  smoothingFactor?: number; // For temporal smoothing (0-1, e.g., 0.1 for fast update, 0.9 for slow update from new value)
+  curve?: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'exponential' | 'logarithmic' | 'sine'; // Shaping curve
+  curveFactor?: number;    // e.g., exponent for exponential curve (default 2), base for log
+  absoluteValue?: boolean; // Take absolute value of source before processing, default false
+  invert?: boolean;        // Invert value (e.g. 1-x for normalized 0-1 range, or -x) after scale/offset, before curve/clamp
+}
+// --- End of New Interface ---
+
 
 export class Unified4DEngine {
   private canvas: HTMLCanvasElement;
@@ -115,13 +144,31 @@ export class Unified4DEngine {
 
   private shaderSources: Record<keyof GeometryType, string>;
   
-  // Interaction tracking
-  private interactionState = {
-    scroll: { velocity: 0, intensity: 0 },
-    click: { frequency: 0, intensity: 0 },
-    mouse: { position: [0.5, 0.5], velocity: 0, intensity: 0 },
-    idle: { duration: 0, isIdle: false }
+  // Raw interaction state (directly from event handlers)
+  private rawInteractionState = {
+    scrollIntensity: 0,         // Normalized scroll intensity
+    clickIntensity: 0,          // Set to 1 on click, decays quickly
+    mouseVelocity: 0,           // Magnitude of mouse movement (units per second)
+    mousePosition: [0.5, 0.5],  // Current normalized mouse position [x, y]
+    lastMousePosition: [0.5, 0.5], // Previous mouse position for velocity calculation
+    currentFrameTime: performance.now(), // Timestamp of the current frame, updated in render loop
+    lastFrameTime: performance.now(),    // Timestamp of the last frame for delta time calculation
+    lastInteractionTime: 0,     // Timestamp of the last user interaction
+    isIdle: false,
+    idleDuration: 0,
   };
+
+  // Stores values set by setCustomReactivityValue()
+  private customReactivityInputs: Record<string, number> = {};
+
+  // Stores the current smoothed value for mappings that use smoothing
+  // Key: typically targetParameter + sourceType, or a unique ID if mappings get one
+  private smoothedMappingValues: Map<string, number> = new Map();
+
+  // Note: `this.config.parameters` will hold the final values applied to shaders.
+  // The new reactivity system will directly update fields in `this.config.parameters`
+  // based on mappings. The `audioBass/Mid/High` might become less directly set if
+  // custom mappings are used, or they could be default targets.
 
   constructor(canvas: HTMLCanvasElement, config: Partial<Unified4DConfig> = {}) {
     this.canvas = canvas;
@@ -212,8 +259,11 @@ export class Unified4DEngine {
   private initialize(): void {
     this.setupWebGL();
     this.createBuffers();
-    this.compileShaders();
+    this.compileShaders(this.config.geometry); // Ensure this uses the correct initial geometry
     this.setupInteractionHandlers();
+    // Initialize lastFrameTime correctly before the first render call
+    this.rawInteractionState.lastFrameTime = performance.now();
+    this.rawInteractionState.currentFrameTime = performance.now();
     console.log('Unified4D: Engine initialized successfully');
   }
 
@@ -422,76 +472,246 @@ export class Unified4DEngine {
   }
 
   private setupInteractionHandlers(): void {
+    const now = performance.now();
+    this.rawInteractionState.lastInteractionTime = now;
+    this.rawInteractionState.lastFrameTime = now;
+    this.rawInteractionState.currentFrameTime = now;
+
     // Mouse movement
     this.canvas.addEventListener('mousemove', (event) => {
       const rect = this.canvas.getBoundingClientRect();
       const x = (event.clientX - rect.left) / rect.width;
-      const y = (event.clientY - rect.top) / rect.height;
-      
-      this.config.parameters.mouse = [x, 1.0 - y]; // Flip Y coordinate
-      this.updateInteractionIntensity('mouse', x, y);
+      const y = 1.0 - (event.clientY - rect.top) / rect.height; // Flip Y coordinate
+
+      this.rawInteractionState.mousePosition = [x, y];
+      // Mouse velocity will be calculated in the render loop using deltaTime for accuracy.
+      // We still update interaction time here.
+      this.markInteraction();
     });
     
     // Mouse click
     this.canvas.addEventListener('click', () => {
-      this.updateInteractionIntensity('click');
+      this.rawInteractionState.clickIntensity = 1.0; // Will be decayed quickly
+      this.markInteraction();
     });
     
     // Scroll handling
     this.canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
-      const velocity = Math.abs(event.deltaY) / 100;
-      this.updateInteractionIntensity('scroll', velocity);
+      // Normalize scroll delta. This might need browser-specific tuning.
+      // A common approach is to look at event.deltaMode.
+      let scrollAmount = event.deltaY;
+      if (event.deltaMode === 1) scrollAmount *= 16; // DOM_DELTA_LINE (roughly 16px per line)
+      else if (event.deltaMode === 2) scrollAmount *= this.canvas.height; // DOM_DELTA_PAGE
+
+      const normalizedScroll = Math.tanh(scrollAmount / (this.config.interactions.scrollSensitivity * 100)); // Normalize and apply sensitivity
+
+      // Accumulate scroll intensity, capped at 1.0, then let decay handle it
+      this.rawInteractionState.scrollIntensity = Math.min(1.0, this.rawInteractionState.scrollIntensity + Math.abs(normalizedScroll));
+      this.markInteraction();
     });
   }
 
-  private updateInteractionIntensity(type: string, ...args: number[]): void {
+  private markInteraction(): void {
     const now = performance.now();
-    
-    switch (type) {
-      case 'scroll':
-        const velocity = args[0] || 0;
-        this.interactionState.scroll.velocity = velocity;
-        this.interactionState.scroll.intensity = Math.min(1.0, velocity / this.config.interactions.scrollSensitivity);
-        this.config.parameters.audioBass = this.interactionState.scroll.intensity;
-        break;
-        
-      case 'click':
-        this.interactionState.click.intensity = 1.0;
-        this.config.parameters.audioMid = this.interactionState.click.intensity;
-        break;
-        
-      case 'mouse':
-        const x = args[0] || 0;
-        const y = args[1] || 0;
-        const mouseVel = Math.sqrt(x * x + y * y);
-        this.interactionState.mouse.velocity = mouseVel;
-        this.interactionState.mouse.intensity = Math.min(1.0, mouseVel / this.config.interactions.mouseSensitivity);
-        this.config.parameters.audioHigh = this.interactionState.mouse.intensity;
-        break;
-    }
-    
-    // Reset idle state
-    this.interactionState.idle.duration = 0;
-    this.interactionState.idle.isIdle = false;
+    this.rawInteractionState.lastInteractionTime = now;
+    this.rawInteractionState.isIdle = false;
+    this.rawInteractionState.idleDuration = 0;
   }
 
-  private updateInteractionDecay(deltaTime: number): void {
-    const decayFactor = Math.max(0.0, 1.0 - (deltaTime / this.config.interactions.decayTime));
+  // This method will be called in the render loop to decay raw interaction values
+  private updateRawInteractionState(deltaTimeInSeconds: number): void {
+    const now = performance.now();
+    this.rawInteractionState.lastFrameTime = this.rawInteractionState.currentFrameTime;
+    this.rawInteractionState.currentFrameTime = now;
+    // Ensure deltaTimeInSeconds is positive and not excessively large if tab was inactive
+    const safeDeltaTime = Math.max(0, Math.min(deltaTimeInSeconds, 0.2)); // Cap at 200ms
+
+    // Calculate mouse velocity
+    const dx = this.rawInteractionState.mousePosition[0] - this.rawInteractionState.lastMousePosition[0];
+    const dy = this.rawInteractionState.mousePosition[1] - this.rawInteractionState.lastMousePosition[1];
+    if (safeDeltaTime > 0) {
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      this.rawInteractionState.mouseVelocity = (distance / safeDeltaTime) * (this.config.interactions.mouseSensitivity / 100); // Adjust sensitivity scaling
+    } else {
+      this.rawInteractionState.mouseVelocity = 0;
+    }
+    this.rawInteractionState.lastMousePosition = [...this.rawInteractionState.mousePosition];
+
+
+    // Decay intensities
+    // Click intensity decays very fast (e.g., within a few frames or one processing cycle)
+    // It's often set to 1 on event, then reset to 0 by the system that consumes it, or decays very rapidly.
+    if (this.rawInteractionState.clickIntensity > 0) {
+         this.rawInteractionState.clickIntensity = Math.max(0, this.rawInteractionState.clickIntensity - (safeDeltaTime * (1000 / Math.max(1, this.config.interactions.decayTime / 10 )))); // Faster decay for click
+    }
     
-    // Apply decay to interaction intensities
-    this.interactionState.scroll.intensity *= decayFactor;
-    this.interactionState.click.intensity *= decayFactor;
-    this.interactionState.mouse.intensity *= decayFactor;
+    // Scroll intensity decay
+    const decayRate = 1.0 / Math.max(0.01, this.config.interactions.decayTime / 1000); // Decay per second
+    this.rawInteractionState.scrollIntensity = Math.max(0, this.rawInteractionState.scrollIntensity - decayRate * safeDeltaTime);
     
-    // Update audio parameters
-    this.config.parameters.audioBass = this.interactionState.scroll.intensity;
-    this.config.parameters.audioMid = this.interactionState.click.intensity;
-    this.config.parameters.audioHigh = this.interactionState.mouse.intensity;
-    
+    // Mouse velocity decay (optional, some prefer it to be instant based on current movement)
+    // If we want velocity to also decay if mouse stops, add similar logic:
+    // this.rawInteractionState.mouseVelocity = Math.max(0, this.rawInteractionState.mouseVelocity - (decayRate * safeDeltaTime * 0.5)); // Slower decay for velocity
+
+
     // Update idle state
-    this.interactionState.idle.duration += deltaTime;
-    this.interactionState.idle.isIdle = this.interactionState.idle.duration > this.config.interactions.idleThreshold;
+    if (!this.rawInteractionState.isIdle) {
+      this.rawInteractionState.idleDuration = now - this.rawInteractionState.lastInteractionTime;
+      if (this.rawInteractionState.idleDuration > this.config.interactions.idleThreshold) {
+        this.rawInteractionState.isIdle = true;
+        console.log("Unified4D: Idle state triggered");
+      }
+    }
+  }
+
+  private getSourceValue(sourceType: ReactivitySourceType): number {
+    if (sourceType.startsWith('custom:')) {
+      const customKey = sourceType.substring('custom:'.length);
+      return this.customReactivityInputs[customKey] || 0;
+    }
+
+    switch (sourceType) {
+      case 'scrollIntensity':
+        return this.rawInteractionState.scrollIntensity;
+      case 'clickIntensity':
+        return this.rawInteractionState.clickIntensity;
+      case 'mouseVelocity':
+        return this.rawInteractionState.mouseVelocity;
+      case 'mousePositionX':
+        return this.rawInteractionState.mousePosition[0];
+      case 'mousePositionY':
+        return this.rawInteractionState.mousePosition[1];
+      case 'time':
+        return this.config.parameters.time; // Raw engine time
+      default:
+        console.warn(`Unified4D: Unknown reactivity sourceType: ${sourceType}`);
+        return 0;
+    }
+  }
+
+  private applyCurve(value: number, curve?: ReactivitySourceMap['curve'], curveFactor: number = 2): number {
+    if (curve === undefined || curve === 'linear') {
+      return value;
+    }
+    // Clamp value to 0-1 for most curve functions, then unclamp if original range was different.
+    // This needs careful thought if inputs are not naturally 0-1.
+    // For now, assuming curves are best applied to values normalized or understood to be in 0-1 range.
+    let t = Math.max(0, Math.min(1, value)); // Common case for curves operating on t in [0,1]
+
+    switch (curve) {
+      case 'easeIn':
+        return t * t * (curveFactor === 2 ? t : Math.pow(t, Math.max(1, curveFactor -1))); // easeInCubic, easeInExpo
+      case 'easeOut':
+        return 1 - Math.pow(1 - t, Math.max(1, curveFactor)); // easeOutCubic, easeOutExpo
+      case 'easeInOut':
+        return t < 0.5
+          ? (Math.pow(2, Math.max(1,curveFactor)-1) * Math.pow(t, Math.max(1,curveFactor)))
+          : (1 - Math.pow(-2 * t + 2, Math.max(1,curveFactor)) / 2);
+      case 'exponential': // Assumes value is normalized, grows exponentially
+        return Math.pow(t, Math.max(1,curveFactor));
+      case 'logarithmic': // Assumes value is normalized, grows logarithmically
+        return Math.log(t * (Math.max(1.01, curveFactor) - 1) + 1) / Math.log(Math.max(1.01, curveFactor));
+      case 'sine': // Simple sine wave for cyclical effects, t from 0 to 1 maps to 0 to PI
+        return (Math.sin(t * Math.PI - Math.PI / 2) + 1) / 2; // Outputs 0-1
+      default:
+        return value;
+    }
+  }
+
+  private getSmoothedValue(mappingKey: string, currentValue: number, smoothingFactor: number | undefined, deltaTime: number): number {
+    if (smoothingFactor === undefined) {
+      return currentValue;
+    }
+    // Convert smoothingFactor (0.1 = fast, 0.9 = slow update from new) to alpha for LERP
+    // A common way: alpha = 1 - exp(-deltaTime / smoothingTimeConstant)
+    // Here, smoothingFactor is more direct: amount of new value to take.
+    // Let's define smoothingFactor as: 0 = instant, close to 1 = very slow.
+    // So, new Alpha = 1.0 - smoothingFactor.
+    // Or, if smoothingFactor is "time constant in seconds": alpha = deltaTime / (smoothingFactor + deltaTime)
+    // Given the comment: "0.1 for fast update, 0.9 for slow update from new value"
+    // This implies smoothingFactor is the weight of the PREVIOUS value.
+    // So, lerpAlpha = 1.0 - smoothingFactor.
+
+    const lerpAlpha = Math.max(0, Math.min(1, 1.0 - smoothingFactor)); // How much of current value to take
+    const previousValue = this.smoothedMappingValues.get(mappingKey) || currentValue;
+    const smoothedValue = previousValue * (1.0 - lerpAlpha) + currentValue * lerpAlpha;
+    // A more frame-rate independent smoothing:
+    // const effectiveSmoothingFactor = Math.pow(smoothingFactor, deltaTime * 60); // Adjust factor based on 60fps baseline
+    // const smoothedValue = previousValue * effectiveSmoothingFactor + currentValue * (1 - effectiveSmoothingFactor);
+
+    this.smoothedMappingValues.set(mappingKey, smoothedValue);
+    return smoothedValue;
+  }
+
+
+  private processReactivity(deltaTime: number): void {
+    if (!this.config.reactivityMappings || this.config.reactivityMappings.length === 0) {
+      // Default behavior if no custom mappings
+      this.config.parameters.audioBass = this.rawInteractionState.scrollIntensity;
+      this.config.parameters.audioMid = this.rawInteractionState.clickIntensity;
+      this.config.parameters.audioHigh = this.rawInteractionState.mouseVelocity;
+      // Note: u_mouse is still set directly in the mousemove handler for direct shader use.
+      return;
+    }
+
+    // Reset default audio params if custom mappings are present,
+    // unless they are explicitly targeted by a mapping.
+    // This ensures that if a user defines reactivityMappings, they take full control
+    // for parameters they map, and unmapped audioBass/Mid/High don't get default values.
+    // A more advanced approach might be to allow additive mappings or specify override behavior.
+    const mappedTargets = new Set(this.config.reactivityMappings.map(m => m.targetParameter));
+    if (!mappedTargets.has('audioBass')) this.config.parameters.audioBass = 0;
+    if (!mappedTargets.has('audioMid')) this.config.parameters.audioMid = 0;
+    if (!mappedTargets.has('audioHigh')) this.config.parameters.audioHigh = 0;
+
+
+    for (const mapping of this.config.reactivityMappings) {
+      let currentValue = this.getSourceValue(mapping.sourceType);
+
+      // 1. Absolute Value
+      if (mapping.absoluteValue) {
+        currentValue = Math.abs(currentValue);
+      }
+
+      // 2. Scale
+      currentValue = currentValue * (mapping.scale === undefined ? 1.0 : mapping.scale);
+
+      // 3. Offset
+      currentValue = currentValue + (mapping.offset === undefined ? 0.0 : mapping.offset);
+
+      // 4. Invert
+      if (mapping.invert) {
+        // Assuming 0-1 range for typical inversion, might need context
+        if (mapping.minClamp === 0 && mapping.maxClamp === 1) { // Basic check
+             currentValue = 1.0 - currentValue;
+        } else {
+             currentValue = -currentValue; // General case
+        }
+      }
+
+      // 5. Smoothing (before curve and clamp, as smoothing is usually on raw-ish data)
+      // The key for smoothed values map needs to be unique per mapping instance.
+      // Using targetParameter + sourceType for now. If multiple mappings target same param from same source, this would clash.
+      // A unique ID on ReactivitySourceMap would be better for robust smoothing.
+      const smoothingKey = `${mapping.targetParameter}_${mapping.sourceType}`;
+      currentValue = this.getSmoothedValue(smoothingKey, currentValue, mapping.smoothingFactor, deltaTime);
+
+      // 6. Curve
+      currentValue = this.applyCurve(currentValue, mapping.curve, mapping.curveFactor);
+
+      // 7. Clamp
+      if (mapping.minClamp !== undefined) {
+        currentValue = Math.max(mapping.minClamp, currentValue);
+      }
+      if (mapping.maxClamp !== undefined) {
+        currentValue = Math.min(mapping.maxClamp, currentValue);
+      }
+
+      // Update the target shader parameter
+      // Type assertion needed as targetParameter is keyof ShaderParameters
+      (this.config.parameters as any)[mapping.targetParameter] = currentValue;
+    }
   }
 
   private setUniforms(): void {
@@ -559,9 +779,12 @@ export class Unified4DEngine {
     this.lastTime = currentTime;
     this.config.parameters.time = currentTime;
     
-    // Update interaction decay
-    this.updateInteractionDecay(deltaTime * 1000);
+    // Update raw interaction state (decay, mouse velocity calculation, idle status)
+    this.updateRawInteractionState(deltaTime); // deltaTime is already in seconds
     
+    // (Next step will be to add processReactivity() here)
+    this.processReactivity(deltaTime); // Process custom or default reactivity
+
     // Check for canvas resize
     this.checkResize();
     
@@ -640,13 +863,41 @@ export class Unified4DEngine {
       Object.assign(this.config.theming, config.theming);
     }
     if (config.geometry) {
-      this.config.geometry = config.geometry;
-      // Note: Geometry switching would require shader recompilation
+      if (this.config.geometry !== config.geometry) {
+        console.log(`Unified4D: Geometry changed from ${this.config.geometry} to ${config.geometry}. Recompiling shaders.`);
+        this.config.geometry = config.geometry;
+        try {
+          this.compileShaders(this.config.geometry);
+        } catch (error) {
+          console.error("Unified4D: Error recompiling shaders for new geometry:", error);
+        }
+      } else {
+        this.config.geometry = config.geometry;
+      }
+    }
+    // Add this:
+    if (config.reactivityMappings !== undefined) { // Check for undefined to allow passing an empty array
+      this.config.reactivityMappings = config.reactivityMappings;
+      // If mappings are cleared or changed significantly, it might be good to clear smoothed values.
+      // For simplicity, clearing all if mappings are set to empty.
+      // A more granular approach would be to remove only stale smoothed values.
+      if (config.reactivityMappings.length === 0) {
+          this.smoothedMappingValues.clear();
+          console.log("Unified4D: Reactivity mappings cleared, resetting smoothed values.");
+      }
     }
   }
 
   public getConfig(): Required<Unified4DConfig> {
     return { ...this.config };
+  }
+
+  public setCustomReactivityValue(sourceName: string, value: number): void {
+    if (!sourceName || sourceName.trim() === "") {
+      console.warn("Unified4D: Custom reactivity sourceName cannot be empty.");
+      return;
+    }
+    this.customReactivityInputs[sourceName] = value;
   }
 
   public dispose(): void {
