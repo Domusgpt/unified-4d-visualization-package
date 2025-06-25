@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unified 4D Visualization Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        .container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        #visualization {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #333;
+            min-width: 250px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #ccc;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            margin-bottom: 5px;
+        }
+        
+        .control-group select {
+            width: 100%;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .btn {
+            padding: 8px 12px;
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        
+        .btn:hover {
+            background: #555;
+        }
+        
+        .btn.active {
+            background: #0a84ff;
+        }
+        
+        .info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #333;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        
+        .info h3 {
+            margin: 0 0 10px 0;
+            color: #0a84ff;
+        }
+        
+        .fps {
+            color: #00ff00;
+            font-weight: bold;
+        }
+        
+        .status {
+            margin-top: 10px;
+            padding: 5px 0;
+            border-top: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="visualization"></canvas>
+        
+        <div class="controls">
+            <h3 style="margin: 0 0 15px 0; color: #0a84ff;">Unified 4D Engine</h3>
+            
+            <div class="button-group">
+                <button class="btn active" onclick="setGeometry('hypercube')">Hypercube</button>
+                <button class="btn" onclick="setGeometry('tetrahedron')">Tetrahedron</button>
+                <button class="btn" onclick="setGeometry('sphere')">Sphere</button>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn" onclick="toggleEngine()">Start/Stop</button>
+                <button class="btn" onclick="resetParameters()">Reset</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Dimension: <span id="dimensionValue">4.0</span></label>
+                <input type="range" id="dimension" min="3.0" max="5.0" step="0.1" value="4.0" oninput="updateParameter('dimension', this.value)">
+            </div>
+            
+            <div class="control-group">
+                <label>Morph Factor: <span id="morphFactorValue">0.5</span></label>
+                <input type="range" id="morphFactor" min="0.0" max="2.0" step="0.1" value="0.5" oninput="updateParameter('morphFactor', this.value)">
+            </div>
+            
+            <div class="control-group">
+                <label>Rotation Speed: <span id="rotationSpeedValue">0.2</span></label>
+                <input type="range" id="rotationSpeed" min="0.0" max="3.0" step="0.1" value="0.2" oninput="updateParameter('rotationSpeed', this.value)">
+            </div>
+            
+            <div class="control-group">
+                <label>Grid Density: <span id="gridDensityValue">8.0</span></label>
+                <input type="range" id="gridDensity" min="1.0" max="25.0" step="0.5" value="8.0" oninput="updateParameter('gridDensity', this.value)">
+            </div>
+            
+            <div class="control-group">
+                <label>Line Thickness: <span id="lineThicknessValue">0.03</span></label>
+                <input type="range" id="lineThickness" min="0.005" max="0.1" step="0.005" value="0.03" oninput="updateParameter('lineThickness', this.value)">
+            </div>
+            
+            <div class="control-group">
+                <label>Theme:</label>
+                <select onchange="setTheme(this.value)">
+                    <option value="hypercube">Hypercube (Magenta)</option>
+                    <option value="tetrahedron">Tetrahedron (Cyan)</option>
+                    <option value="sphere">Sphere (Yellow)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="info">
+            <h3>🚀 Autonomous Development Test</h3>
+            <div>FPS: <span class="fps" id="fps">--</span></div>
+            <div>WebGL: <span id="webglVersion">--</span></div>
+            <div>Canvas: <span id="canvasSize">--</span></div>
+            <div>Interactions: <span id="interactions">--</span></div>
+            
+            <div class="status">
+                <strong>Status:</strong> <span id="status">Initializing...</span>
+            </div>
+            
+            <div style="margin-top: 10px; font-size: 10px; color: #888;">
+                🤖 Created by Claude Code Agentic System<br>
+                📦 @unified4d/visualization-engine v1.0.0<br>
+                🎯 Test scroll, click, and mouse movement!
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Mock the module system for testing
+        class Unified4DEngine {
+            constructor(canvas, config = {}) {
+                this.canvas = canvas;
+                this.gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                this.isWebGL2 = !!canvas.getContext('webgl2');
+                this.isRendering = false;
+                this.animationFrameId = null;
+                this.startTime = 0;
+                this.lastTime = 0;
+                
+                // Default config
+                this.config = {
+                    geometry: 'hypercube',
+                    parameters: {
+                        time: 0,
+                        resolution: [canvas.width, canvas.height],
+                        mouse: [0.5, 0.5],
+                        dimension: 4.0,
+                        morphFactor: 0.5,
+                        rotationSpeed: 0.2,
+                        gridDensity: 8.0,
+                        lineThickness: 0.03,
+                        universeModifier: 1.0,
+                        patternIntensity: 1.0,
+                        shellWidth: 0.025,
+                        tetraThickness: 0.035,
+                        glitchIntensity: 0.0,
+                        colorShift: 0.0,
+                        audioBass: 0.0,
+                        audioMid: 0.0,
+                        audioHigh: 0.0
+                    },
+                    theming: {
+                        primary: [1.0, 0.2, 0.8],
+                        secondary: [0.2, 1.0, 1.0],
+                        background: [0.05, 0.0, 0.2],
+                        accent: [1.0, 1.0, 0.0]
+                    },
+                    ...config
+                };
+                
+                this.interactionState = {
+                    scroll: { intensity: 0 },
+                    click: { intensity: 0 },
+                    mouse: { intensity: 0 }
+                };
+                
+                this.initialize();
+            }
+            
+            initialize() {
+                this.setupWebGL();
+                this.createBuffers();
+                this.compileShaders();
+                this.setupInteractionHandlers();
+                console.log('Unified4D: Engine initialized');
+            }
+            
+            setupWebGL() {
+                const gl = this.gl;
+                const bg = this.config.theming.background;
+                gl.clearColor(bg[0], bg[1], bg[2], 1.0);
+                gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                gl.disable(gl.DEPTH_TEST);
+                gl.enable(gl.BLEND);
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            }
+            
+            createBuffers() {
+                const gl = this.gl;
+                const vertices = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+                this.vertexBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            }
+            
+            compileShaders() {
+                const gl = this.gl;
+                
+                const vertexShaderSource = \`
+                    attribute vec2 a_position;
+                    void main() {
+                        gl_Position = vec4(a_position, 0.0, 1.0);
+                    }
+                \`;
+                
+                const fragmentShaderSource = \`
+                    precision mediump float;
+                    
+                    uniform vec2 u_resolution;
+                    uniform float u_time;
+                    uniform vec2 u_mouse;
+                    uniform float u_dimension;
+                    uniform float u_morphFactor;
+                    uniform float u_rotationSpeed;
+                    uniform float u_gridDensity;
+                    uniform float u_lineThickness;
+                    uniform float u_audioBass;
+                    uniform float u_audioMid;
+                    uniform float u_audioHigh;
+                    uniform vec3 u_primaryColor;
+                    uniform vec3 u_secondaryColor;
+                    uniform vec3 u_backgroundColor;
+                    
+                    mat4 rotXW(float angle) {
+                        float c = cos(angle);
+                        float s = sin(angle);
+                        return mat4(c, 0, 0, -s, 0, 1, 0, 0, 0, 0, 1, 0, s, 0, 0, c);
+                    }
+                    
+                    mat4 rotYZ(float angle) {
+                        float c = cos(angle);
+                        float s = sin(angle);
+                        return mat4(1, 0, 0, 0, 0, c, -s, 0, 0, s, c, 0, 0, 0, 0, 1);
+                    }
+                    
+                    vec3 project4Dto3D(vec4 p4d) {
+                        float w = p4d.w + 2.5;
+                        return p4d.xyz / max(0.1, w);
+                    }
+                    
+                    float calculateLattice(vec3 p) {
+                        float dynamicGridDensity = max(0.1, u_gridDensity * (1.0 + u_audioBass * 0.7));
+                        float dynamicLineThickness = max(0.002, u_lineThickness * (1.0 - u_audioMid * 0.6));
+                        
+                        vec3 p_grid3D = fract(p * dynamicGridDensity * 0.5 + u_time * 0.01);
+                        vec3 dist3D = abs(p_grid3D - 0.5);
+                        float box3D = max(dist3D.x, max(dist3D.y, dist3D.z));
+                        float lattice3D = smoothstep(0.5, 0.5 - dynamicLineThickness, box3D);
+                        
+                        float dim_factor = smoothstep(3.0, 4.5, u_dimension);
+                        if (dim_factor > 0.01) {
+                            float w_coord = sin(p.x*1.4 - p.y*0.7 + p.z*1.5 + u_time * 0.25)
+                                          * cos(length(p) * 1.1 - u_time * 0.35 + u_audioMid * 2.5)
+                                          * dim_factor * (0.4 + u_morphFactor * 0.6 + u_audioHigh * 0.6);
+                            
+                            vec4 p4d = vec4(p, w_coord);
+                            p4d = rotXW(u_time * 0.33 * u_rotationSpeed) * rotYZ(u_time * 0.28 * u_rotationSpeed) * p4d;
+                            
+                            vec3 projectedP = project4Dto3D(p4d);
+                            vec3 p_grid4D = fract(projectedP * dynamicGridDensity * 0.5 + u_time * 0.015);
+                            vec3 dist4D = abs(p_grid4D - 0.5);
+                            float box4D = max(dist4D.x, max(dist4D.y, dist4D.z));
+                            float lattice4D = smoothstep(0.5, 0.5 - dynamicLineThickness, box4D);
+                            
+                            return mix(lattice3D, lattice4D, smoothstep(0.0, 1.0, u_morphFactor));
+                        }
+                        
+                        return lattice3D;
+                    }
+                    
+                    void main() {
+                        vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
+                        vec2 mouseOffset = (u_mouse - 0.5) * 2.0;
+                        uv += mouseOffset * 0.5;
+                        
+                        vec3 p = vec3(uv * 2.0, 0.0);
+                        float lattice = calculateLattice(p);
+                        
+                        vec3 color = mix(u_backgroundColor, u_primaryColor, lattice);
+                        color = mix(color, u_secondaryColor, lattice * u_audioHigh);
+                        
+                        float glow = lattice * (1.0 + u_audioHigh * 0.5);
+                        color *= glow;
+                        
+                        gl_FragColor = vec4(color, 1.0);
+                    }
+                \`;
+                
+                const vertexShader = this.compileShader(gl.VERTEX_SHADER, vertexShaderSource);
+                const fragmentShader = this.compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+                
+                this.shaderProgram = gl.createProgram();
+                gl.attachShader(this.shaderProgram, vertexShader);
+                gl.attachShader(this.shaderProgram, fragmentShader);
+                gl.linkProgram(this.shaderProgram);
+                
+                if (!gl.getProgramParameter(this.shaderProgram, gl.LINK_STATUS)) {
+                    throw new Error('Shader program linking failed: ' + gl.getProgramInfoLog(this.shaderProgram));
+                }
+                
+                this.getUniformLocations();
+                gl.deleteShader(vertexShader);
+                gl.deleteShader(fragmentShader);
+            }
+            
+            compileShader(type, source) {
+                const gl = this.gl;
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    const error = gl.getShaderInfoLog(shader);
+                    gl.deleteShader(shader);
+                    throw new Error('Shader compilation failed: ' + error);
+                }
+                
+                return shader;
+            }
+            
+            getUniformLocations() {
+                const gl = this.gl;
+                this.uniforms = {};
+                const uniformNames = [
+                    'u_resolution', 'u_time', 'u_mouse', 'u_dimension', 'u_morphFactor',
+                    'u_rotationSpeed', 'u_gridDensity', 'u_lineThickness', 'u_audioBass',
+                    'u_audioMid', 'u_audioHigh', 'u_primaryColor', 'u_secondaryColor',
+                    'u_backgroundColor'
+                ];
+                
+                uniformNames.forEach(name => {
+                    this.uniforms[name] = gl.getUniformLocation(this.shaderProgram, name);
+                });
+            }
+            
+            setupInteractionHandlers() {
+                this.canvas.addEventListener('mousemove', (event) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = (event.clientX - rect.left) / rect.width;
+                    const y = (event.clientY - rect.top) / rect.height;
+                    
+                    this.config.parameters.mouse = [x, 1.0 - y];
+                    this.interactionState.mouse.intensity = Math.min(1.0, Math.sqrt(x*x + y*y) / 2.0);
+                    this.config.parameters.audioHigh = this.interactionState.mouse.intensity;
+                });
+                
+                this.canvas.addEventListener('click', () => {
+                    this.interactionState.click.intensity = 1.0;
+                    this.config.parameters.audioMid = 1.0;
+                    setTimeout(() => {
+                        this.interactionState.click.intensity = 0.0;
+                        this.config.parameters.audioMid = 0.0;
+                    }, 200);
+                });
+                
+                this.canvas.addEventListener('wheel', (event) => {
+                    event.preventDefault();
+                    const velocity = Math.abs(event.deltaY) / 100;
+                    this.interactionState.scroll.intensity = Math.min(1.0, velocity / 2.0);
+                    this.config.parameters.audioBass = this.interactionState.scroll.intensity;
+                    
+                    setTimeout(() => {
+                        this.interactionState.scroll.intensity *= 0.9;
+                        this.config.parameters.audioBass = this.interactionState.scroll.intensity;
+                    }, 100);
+                });
+            }
+            
+            setUniforms() {
+                const gl = this.gl;
+                if (!this.shaderProgram) return;
+                
+                gl.useProgram(this.shaderProgram);
+                
+                if (this.uniforms.u_resolution) {
+                    gl.uniform2f(this.uniforms.u_resolution, this.config.parameters.resolution[0], this.config.parameters.resolution[1]);
+                }
+                if (this.uniforms.u_time) {
+                    gl.uniform1f(this.uniforms.u_time, this.config.parameters.time);
+                }
+                if (this.uniforms.u_mouse) {
+                    gl.uniform2f(this.uniforms.u_mouse, this.config.parameters.mouse[0], this.config.parameters.mouse[1]);
+                }
+                if (this.uniforms.u_dimension) {
+                    gl.uniform1f(this.uniforms.u_dimension, this.config.parameters.dimension);
+                }
+                if (this.uniforms.u_morphFactor) {
+                    gl.uniform1f(this.uniforms.u_morphFactor, this.config.parameters.morphFactor);
+                }
+                if (this.uniforms.u_rotationSpeed) {
+                    gl.uniform1f(this.uniforms.u_rotationSpeed, this.config.parameters.rotationSpeed);
+                }
+                if (this.uniforms.u_gridDensity) {
+                    gl.uniform1f(this.uniforms.u_gridDensity, this.config.parameters.gridDensity);
+                }
+                if (this.uniforms.u_lineThickness) {
+                    gl.uniform1f(this.uniforms.u_lineThickness, this.config.parameters.lineThickness);
+                }
+                if (this.uniforms.u_audioBass) {
+                    gl.uniform1f(this.uniforms.u_audioBass, this.config.parameters.audioBass);
+                }
+                if (this.uniforms.u_audioMid) {
+                    gl.uniform1f(this.uniforms.u_audioMid, this.config.parameters.audioMid);
+                }
+                if (this.uniforms.u_audioHigh) {
+                    gl.uniform1f(this.uniforms.u_audioHigh, this.config.parameters.audioHigh);
+                }
+                if (this.uniforms.u_primaryColor) {
+                    gl.uniform3f(this.uniforms.u_primaryColor, ...this.config.theming.primary);
+                }
+                if (this.uniforms.u_secondaryColor) {
+                    gl.uniform3f(this.uniforms.u_secondaryColor, ...this.config.theming.secondary);
+                }
+                if (this.uniforms.u_backgroundColor) {
+                    gl.uniform3f(this.uniforms.u_backgroundColor, ...this.config.theming.background);
+                }
+            }
+            
+            render(timestamp) {
+                if (!this.isRendering) return;
+                
+                if (!this.startTime) this.startTime = timestamp;
+                const currentTime = (timestamp - this.startTime) * 0.001;
+                const deltaTime = currentTime - this.lastTime;
+                this.lastTime = currentTime;
+                this.config.parameters.time = currentTime;
+                
+                this.checkResize();
+                this.setUniforms();
+                
+                const gl = this.gl;
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                
+                if (this.vertexBuffer) {
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+                    const positionAttribute = gl.getAttribLocation(this.shaderProgram, 'a_position');
+                    gl.enableVertexAttribArray(positionAttribute);
+                    gl.vertexAttribPointer(positionAttribute, 2, gl.FLOAT, false, 0, 0);
+                    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                }
+                
+                this.animationFrameId = requestAnimationFrame((ts) => this.render(ts));
+                
+                // Update FPS counter
+                if (window.fpsCounter) {
+                    window.fpsCounter.update(timestamp);
+                }
+            }
+            
+            checkResize() {
+                const displayWidth = this.canvas.clientWidth;
+                const displayHeight = this.canvas.clientHeight;
+                
+                if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
+                    this.canvas.width = displayWidth;
+                    this.canvas.height = displayHeight;
+                    this.gl.viewport(0, 0, displayWidth, displayHeight);
+                    this.config.parameters.resolution = [displayWidth, displayHeight];
+                }
+            }
+            
+            start() {
+                if (this.isRendering) return;
+                console.log('Unified4D: Starting render loop');
+                this.isRendering = true;
+                this.startTime = 0;
+                this.lastTime = 0;
+                this.animationFrameId = requestAnimationFrame((ts) => this.render(ts));
+            }
+            
+            stop() {
+                if (!this.isRendering) return;
+                console.log('Unified4D: Stopping render loop');
+                this.isRendering = false;
+                if (this.animationFrameId) {
+                    cancelAnimationFrame(this.animationFrameId);
+                    this.animationFrameId = null;
+                }
+            }
+            
+            updateParameters(params) {
+                Object.assign(this.config.parameters, params);
+            }
+            
+            updateConfig(config) {
+                if (config.parameters) Object.assign(this.config.parameters, config.parameters);
+                if (config.theming) Object.assign(this.config.theming, config.theming);
+            }
+            
+            dispose() {
+                this.stop();
+                // Cleanup WebGL resources
+                if (this.gl && !this.gl.isContextLost()) {
+                    if (this.vertexBuffer) this.gl.deleteBuffer(this.vertexBuffer);
+                    if (this.shaderProgram) this.gl.deleteProgram(this.shaderProgram);
+                }
+            }
+        }
+
+        // FPS Counter
+        class FPSCounter {
+            constructor() {
+                this.frameCount = 0;
+                this.lastTime = 0;
+                this.fps = 0;
+            }
+            
+            update(timestamp) {
+                this.frameCount++;
+                if (timestamp - this.lastTime >= 1000) {
+                    this.fps = Math.round((this.frameCount * 1000) / (timestamp - this.lastTime));
+                    this.frameCount = 0;
+                    this.lastTime = timestamp;
+                    document.getElementById('fps').textContent = this.fps;
+                }
+            }
+        }
+
+        // Global variables
+        let engine = null;
+        window.fpsCounter = new FPSCounter();
+
+        // Themes
+        const themes = {
+            hypercube: {
+                primary: [1.0, 0.2, 0.8],
+                secondary: [0.2, 1.0, 1.0],
+                background: [0.05, 0.0, 0.2]
+            },
+            tetrahedron: {
+                primary: [0.2, 1.0, 1.0],
+                secondary: [1.0, 1.0, 1.0],
+                background: [0.0, 0.1, 0.2]
+            },
+            sphere: {
+                primary: [1.0, 1.0, 0.0],
+                secondary: [1.0, 0.5, 0.0],
+                background: [0.1, 0.1, 0.0]
+            }
+        };
+
+        // Initialize
+        function init() {
+            const canvas = document.getElementById('visualization');
+            
+            try {
+                engine = new Unified4DEngine(canvas, {
+                    geometry: 'hypercube',
+                    theming: themes.hypercube
+                });
+                
+                engine.start();
+                updateStatus('Running successfully! 🚀');
+                
+                // Update info
+                document.getElementById('webglVersion').textContent = engine.isWebGL2 ? 'WebGL 2.0' : 'WebGL 1.0';
+                updateCanvasSize();
+                
+            } catch (error) {
+                console.error('Failed to initialize:', error);
+                updateStatus('❌ Initialization failed: ' + error.message);
+            }
+        }
+
+        // Control functions
+        window.updateParameter = function(name, value) {
+            if (!engine) return;
+            
+            const numValue = parseFloat(value);
+            engine.updateParameters({ [name]: numValue });
+            document.getElementById(name + 'Value').textContent = numValue.toFixed(2);
+        };
+
+        window.setGeometry = function(geometry) {
+            if (!engine) return;
+            
+            // Update button states
+            document.querySelectorAll('.btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update theme
+            if (themes[geometry]) {
+                engine.updateConfig({ theming: themes[geometry] });
+            }
+            
+            updateStatus(\`Switched to \${geometry} geometry\`);
+        };
+
+        window.setTheme = function(themeName) {
+            if (!engine || !themes[themeName]) return;
+            engine.updateConfig({ theming: themes[themeName] });
+        };
+
+        window.toggleEngine = function() {
+            if (!engine) return;
+            
+            if (engine.isRendering) {
+                engine.stop();
+                updateStatus('Stopped');
+            } else {
+                engine.start();
+                updateStatus('Running');
+            }
+        };
+
+        window.resetParameters = function() {
+            if (!engine) return;
+            
+            const defaults = {
+                dimension: 4.0,
+                morphFactor: 0.5,
+                rotationSpeed: 0.2,
+                gridDensity: 8.0,
+                lineThickness: 0.03
+            };
+            
+            engine.updateParameters(defaults);
+            
+            // Update UI
+            Object.entries(defaults).forEach(([key, value]) => {
+                const input = document.getElementById(key);
+                if (input) {
+                    input.value = value;
+                    document.getElementById(key + 'Value').textContent = value.toFixed(2);
+                }
+            });
+            
+            updateStatus('Parameters reset to defaults');
+        };
+
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        function updateCanvasSize() {
+            const canvas = document.getElementById('visualization');
+            document.getElementById('canvasSize').textContent = \`\${canvas.width}x\${canvas.height}\`;
+        }
+
+        function updateInteractionInfo() {
+            if (!engine) return;
+            
+            const interactions = [
+                \`Bass: \${(engine.config.parameters.audioBass * 100).toFixed(0)}%\`,
+                \`Mid: \${(engine.config.parameters.audioMid * 100).toFixed(0)}%\`,
+                \`High: \${(engine.config.parameters.audioHigh * 100).toFixed(0)}%\`
+            ].join(' | ');
+            
+            document.getElementById('interactions').textContent = interactions;
+        }
+
+        // Window resize handling
+        window.addEventListener('resize', updateCanvasSize);
+
+        // Update interaction info periodically
+        setInterval(updateInteractionInfo, 100);
+
+        // Initialize when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
