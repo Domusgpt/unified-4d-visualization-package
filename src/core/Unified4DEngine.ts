@@ -5,6 +5,29 @@
  * and HyperAV visualization systems into a unified TypeScript package.
  */
 
+// Import shader source files.
+// Note: This assumes a build setup (e.g., Rollup with rollup-plugin-string or Webpack with raw-loader)
+// that handles .vert and .frag files and makes their content available as string imports.
+
+// @ts-ignore - Assume bundler handles this import
+import commonVertexShaderSource from '../shaders/common.vert';
+// @ts-ignore - Assume bundler handles this import
+import hypercubeFragmentShaderSource from '../shaders/hypercube.frag';
+// @ts-ignore - Assume bundler handles this import
+import hypersphereFragmentShaderSource from '../shaders/hypersphere.frag';
+// @ts-ignore - Assume bundler handles this import
+import tetrahedronFragmentShaderSource from '../shaders/tetrahedron.frag';
+// @ts-ignore - Assume bundler handles this import
+import torusFragmentShaderSource from '../shaders/torus.frag';
+// @ts-ignore - Assume bundler handles this import
+import kleinBottleFragmentShaderSource from '../shaders/klein_bottle.frag';
+// @ts-ignore - Assume bundler handles this import
+import fractalFragmentShaderSource from '../shaders/fractal.frag';
+// @ts-ignore - Assume bundler handles this import
+import waveFunctionFragmentShaderSource from '../shaders/wave_function.frag';
+// @ts-ignore - Assume bundler handles this import
+import crystalLatticeFragmentShaderSource from '../shaders/crystal_lattice.frag';
+
 export interface GeometryType {
   HYPERCUBE: 'hypercube';
   HYPERSPHERE: 'hypersphere';
@@ -89,6 +112,8 @@ export class Unified4DEngine {
   private shaderProgram: WebGLProgram | null = null;
   private vertexBuffer: WebGLBuffer | null = null;
   private uniformLocations: Map<string, WebGLUniformLocation> = new Map();
+
+  private shaderSources: Record<keyof GeometryType, string>;
   
   // Interaction tracking
   private interactionState = {
@@ -100,6 +125,17 @@ export class Unified4DEngine {
 
   constructor(canvas: HTMLCanvasElement, config: Partial<Unified4DConfig> = {}) {
     this.canvas = canvas;
+
+    this.shaderSources = {
+      HYPERCUBE: hypercubeFragmentShaderSource,
+      HYPERSPHERE: hypersphereFragmentShaderSource,
+      TETRAHEDRON: tetrahedronFragmentShaderSource,
+      TORUS: torusFragmentShaderSource,
+      KLEIN_BOTTLE: kleinBottleFragmentShaderSource,
+      FRACTAL: fractalFragmentShaderSource,
+      WAVE_FUNCTION: waveFunctionFragmentShaderSource,
+      CRYSTAL_LATTICE: crystalLatticeFragmentShaderSource,
+    };
     
     // Initialize WebGL context
     const gl2 = canvas.getContext('webgl2');
